@@ -4,7 +4,7 @@ from django.contrib.auth.models import AbstractUser
 
 class User(AbstractUser):
     bio = models.TextField(blank=True)
-    avatar = models.URLField(blank=True, max_length=500)  # Supabase URL
+    avatar = models.URLField(max_length=500, blank=True)
     is_monetized = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
     is_suspended = models.BooleanField(default=False)
@@ -13,10 +13,8 @@ class User(AbstractUser):
     followers_count = models.PositiveIntegerField(default=0)
     following_count = models.PositiveIntegerField(default=0)
     likes_count = models.PositiveIntegerField(default=0)
-
     class Meta:
         db_table = 'vertext_user'
-
 
 class Follow(models.Model):
     follower = models.ForeignKey(User, related_name='following', on_delete=models.CASCADE)
@@ -25,26 +23,23 @@ class Follow(models.Model):
     class Meta:
         unique_together = ('follower', 'following')
 
-
 class AdLink(models.Model):
     PLATFORM_CHOICES = [('monetag','Monetag'),('adsense','Google AdSense'),('custom','Custom')]
     title = models.CharField(max_length=200)
     platform = models.CharField(max_length=50, choices=PLATFORM_CHOICES)
     ad_code = models.TextField(blank=True)
     ad_url = models.URLField(blank=True)
-    thumbnail = models.URLField(blank=True, max_length=500)
+    thumbnail_url = models.URLField(max_length=500, blank=True)
     revenue_per_view = models.DecimalField(max_digits=8, decimal_places=6, default=0.0001)
     is_active = models.BooleanField(default=True)
     show_frequency = models.PositiveIntegerField(default=7)
     created_at = models.DateTimeField(auto_now_add=True)
 
-
 class Video(models.Model):
     VISIBILITY = [('public','Public'),('friends','Friends'),('private','Private')]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videos')
-    # Store Supabase public URLs directly — no local file storage
-    video_url = models.URLField(max_length=1000, blank=True)
-    thumbnail_url = models.URLField(max_length=1000, blank=True)
+    video_url = models.URLField(max_length=500, blank=True)
+    thumbnail_url = models.URLField(max_length=500, blank=True)
     caption = models.TextField(blank=True)
     visibility = models.CharField(max_length=10, choices=VISIBILITY, default='public')
     is_ad = models.BooleanField(default=False)
@@ -56,10 +51,8 @@ class Video(models.Model):
     views_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     is_deleted = models.BooleanField(default=False)
-
     class Meta:
         ordering = ['-created_at']
-
 
 class Like(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -67,7 +60,6 @@ class Like(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         unique_together = ('user', 'video')
-
 
 class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -79,14 +71,12 @@ class Comment(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-
 class Save(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     video = models.ForeignKey(Video, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         unique_together = ('user', 'video')
-
 
 class AdView(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ad_views')
@@ -96,7 +86,6 @@ class AdView(models.Model):
     creator_revenue = models.DecimalField(max_digits=10, decimal_places=6, default=0)
     platform_revenue = models.DecimalField(max_digits=10, decimal_places=6, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
-
     def save(self, *args, **kwargs):
         self.gross_revenue = self.ad_link.revenue_per_view
         self.creator_revenue = self.gross_revenue * 4 / 10
@@ -109,7 +98,6 @@ class AdView(models.Model):
                 total_earnings=F('total_earnings') + self.creator_revenue
             )
 
-
 class Notification(models.Model):
     TYPES = [('like','Like'),('comment','Comment'),('follow','Follow'),('earnings','Earnings')]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -118,7 +106,6 @@ class Notification(models.Model):
     text = models.CharField(max_length=300)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-
 
 class WithdrawalRequest(models.Model):
     STATUS = [('pending','Pending'),('approved','Approved'),('rejected','Rejected')]
