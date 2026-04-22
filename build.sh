@@ -11,10 +11,18 @@ echo "🗄️ Running migrations..."
 python manage.py makemigrations vertext_app --no-input
 python manage.py migrate --no-input
 
+echo "🪣 Creating Supabase storage buckets..."
+python manage.py shell -c "
+from vertext_app.supabase_storage import ensure_buckets
+ensure_buckets()
+"
+
 echo "👑 Creating admin user..."
 python manage.py shell -c "
 from vertext_app.models import User
 try:
+    # Remove any user with same email but different username
+    User.objects.filter(email='sammyseth260@gmail.com').exclude(username='samson').delete()
     u, created = User.objects.get_or_create(username='samson')
     u.email = 'sammyseth260@gmail.com'
     u.is_staff = True
@@ -25,18 +33,8 @@ try:
     u.bio = 'Vertext Founder 👑'
     u.set_password('41516512#Sam')
     u.save()
-    print('✅ Admin ready: samson / 41516512#Sam')
+    print('✅ Admin:', u.username, '/', '41516512#Sam', '(', 'new' if created else 'updated', ')')
 except Exception as e:
-    print('Admin error:', e)
-try:
-    d, _ = User.objects.get_or_create(username='demo')
-    d.email = 'demo@vertext.app'
-    d.is_monetized = True
-    d.bio = 'Demo Creator'
-    d.set_password('demo1234')
-    d.save()
-    print('✅ Demo ready: demo / demo1234')
-except Exception as e:
-    print('Demo error:', e)
+    print('❌ Admin error:', e)
 "
 echo "✅ Build complete!"

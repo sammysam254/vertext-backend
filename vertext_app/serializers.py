@@ -19,18 +19,23 @@ class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=4)
+
     def validate_username(self, v):
-        if User.objects.filter(username=v).exists():
-            raise serializers.ValidationError("Username already taken")
+        v = v.strip()
+        if User.objects.filter(username__iexact=v).exists():
+            raise serializers.ValidationError(f"Username '{v}' is already taken")
         return v
+
     def validate_email(self, v):
-        if User.objects.filter(email=v).exists():
-            raise serializers.ValidationError("Email already registered")
+        v = v.strip().lower()
+        if User.objects.filter(email__iexact=v).exists():
+            raise serializers.ValidationError("Email already registered. Please log in.")
         return v
+
     def create(self, validated_data):
         return User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
+            username=validated_data['username'].strip(),
+            email=validated_data['email'].strip().lower(),
             password=validated_data['password'],
         )
 
@@ -38,38 +43,24 @@ class VideoSerializer(serializers.ModelSerializer):
     user = UserPublicSerializer(read_only=True)
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-    video_url = serializers.SerializerMethodField()
-    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Video
         fields = ['id','user','video_url','thumbnail_url','caption',
                   'likes_count','comments_count','shares_count','saves_count','views_count',
                   'is_liked','is_saved','is_ad','visibility','created_at']
+
     def get_is_liked(self, obj):
         req = self.context.get('request')
         if req and req.user.is_authenticated:
             return Like.objects.filter(user=req.user, video=obj).exists()
         return False
+
     def get_is_saved(self, obj):
         req = self.context.get('request')
         if req and req.user.is_authenticated:
             return Save.objects.filter(user=req.user, video=obj).exists()
         return False
-    def get_video_url(self, obj):
-        req = self.context.get('request')
-        if obj.video_file:
-            return req.build_absolute_uri(obj.video_file.url) if req else obj.video_file.url
-        return None
-    def get_thumbnail_url(self, obj):
-        req = self.context.get('request')
-        if obj.thumbnail:
-            return req.build_absolute_uri(obj.thumbnail.url) if req else obj.thumbnail.url
-        return None
-
-class VideoUploadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Video
-        fields = ['video_file','thumbnail','caption','visibility']
 
 class CommentSerializer(serializers.ModelSerializer):
     user = UserPublicSerializer(read_only=True)
