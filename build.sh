@@ -30,7 +30,6 @@ python manage.py collectstatic --no-input
 
 echo ""
 echo "🗄️ Running migrations..."
-python manage.py makemigrations vertext_app --no-input
 python manage.py migrate --fake-initial --no-input
 
 echo ""
