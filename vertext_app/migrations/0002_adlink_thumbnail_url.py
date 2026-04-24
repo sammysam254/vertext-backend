@@ -1,4 +1,4 @@
-from django.db import migrations, models
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -8,9 +8,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='adlink',
-            name='thumbnail_url',
-            field=models.URLField(blank=True, max_length=500),
+        migrations.RunSQL(
+            sql="ALTER TABLE vertext_app_adlink ADD COLUMN IF NOT EXISTS thumbnail_url varchar(500) NOT NULL DEFAULT '';",
+            reverse_sql="ALTER TABLE vertext_app_adlink DROP COLUMN IF EXISTS thumbnail_url;",
         ),
     ]
