@@ -11,6 +11,7 @@ urlpatterns = [
     path('videos/<int:video_id>/delete/', views.delete_video),
     path('videos/<int:video_id>/like/', views.like_video),
     path('videos/<int:video_id>/save/', views.save_video),
+    path('videos/<int:video_id>/view/', views.view_video),   # ← new
     path('videos/<int:video_id>/comments/', views.comments),
     path('profile/<str:username>/', views.user_profile),
     path('profile/<str:username>/follow/', views.follow_user),
@@ -18,4 +19,5 @@ urlpatterns = [
     path('earnings/withdraw/', views.request_withdrawal),
     path('notifications/', views.notifications),
     path('ads/', views.active_ads),
+    path('ads/<int:ad_id>/view/', views.record_ad_view),
 ]

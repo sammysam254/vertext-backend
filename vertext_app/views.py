@@ -4,7 +4,6 @@ from datetime import timedelta
 from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (User, Video, Like, Comment, Save, Follow,
                      AdLink, AdView, Notification, WithdrawalRequest)
@@ -13,23 +12,16 @@ from .serializers import (UserPublicSerializer, UserPrivateSerializer,
     AdLinkSerializer, NotificationSerializer)
 
 
-# ── Auth ──────────────────────────────────────────────────
-
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def register(request):
-    from .serializers import RegisterSerializer
     ser = RegisterSerializer(data=request.data)
     if not ser.is_valid():
-        first_error = next(iter(ser.errors.values()))[0]
-        return Response({'detail': str(first_error)}, status=400)
+        first = next(iter(ser.errors.values()))[0]
+        return Response({'detail': str(first)}, status=400)
     user = ser.save()
     refresh = RefreshToken.for_user(user)
-    return Response({
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-        'user': UserPrivateSerializer(user).data,
-    }, status=201)
+    return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'user': UserPrivateSerializer(user).data}, status=201)
 
 
 @api_view(['POST'])
@@ -52,11 +44,7 @@ def login_view(request):
     if user.is_suspended:
         return Response({'detail': 'Account suspended. Contact support.'}, status=403)
     refresh = RefreshToken.for_user(user)
-    return Response({
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-        'user': UserPrivateSerializer(user).data,
-    })
+    return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'user': UserPrivateSerializer(user).data})
 
 
 @api_view(['GET', 'PATCH'])
@@ -64,7 +52,6 @@ def login_view(request):
 def me(request):
     if request.method == 'GET':
         return Response(UserPrivateSerializer(request.user).data)
-    # Handle avatar upload
     if request.FILES.get('avatar'):
         try:
             from .supabase_storage import upload_avatar
@@ -73,23 +60,17 @@ def me(request):
             request.user.save(update_fields=['avatar'])
         except Exception as e:
             return Response({'detail': f'Avatar upload failed: {e}'}, status=400)
-    # Handle other fields
-    allowed = ['bio', 'first_name', 'last_name']
-    for field in allowed:
+    for field in ['bio', 'first_name', 'last_name']:
         if field in request.data:
             setattr(request.user, field, request.data[field])
     request.user.save()
     return Response(UserPrivateSerializer(request.user).data)
 
 
-# ── Feed ──────────────────────────────────────────────────
-
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticatedOrReadOnly])
 def feed(request):
-    videos = Video.objects.filter(
-        visibility='public', is_deleted=False
-    ).select_related('user').order_by('-created_at')[:50]
+    videos = Video.objects.filter(visibility='public', is_deleted=False).select_related('user').order_by('-created_at')[:50]
     return Response(VideoSerializer(videos, many=True, context={'request': request}).data)
 
 
@@ -97,47 +78,30 @@ def feed(request):
 @permission_classes([permissions.IsAuthenticated])
 def following_feed(request):
     ids = Follow.objects.filter(follower=request.user).values_list('following_id', flat=True)
-    if ids:
-        qs = Video.objects.filter(user__in=ids, visibility__in=['public','friends'], is_deleted=False)
-    else:
-        qs = Video.objects.filter(visibility='public', is_deleted=False)
-    return Response(VideoSerializer(
-        qs.select_related('user').order_by('-created_at')[:30],
-        many=True, context={'request': request}
-    ).data)
+    qs = (Video.objects.filter(user__in=ids, visibility__in=['public', 'friends'], is_deleted=False)
+          if ids else Video.objects.filter(visibility='public', is_deleted=False))
+    return Response(VideoSerializer(qs.select_related('user').order_by('-created_at')[:30], many=True, context={'request': request}).data)
 
-
-# ── Video Upload — stores in Supabase Storage ──────────────
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def upload_video(request):
     video_file = request.FILES.get('video_file')
     thumbnail_file = request.FILES.get('thumbnail')
-    caption = request.data.get('caption', '')
-    visibility = request.data.get('visibility', 'public')
-
     if not video_file:
         return Response({'detail': 'No video file provided'}, status=400)
-
     try:
-        from .supabase_storage import upload_video as sb_upload_video, upload_thumbnail
-        # Upload video to Supabase
-        video_url = sb_upload_video(video_file)
-        # Upload thumbnail if provided
-        thumb_url = ''
-        if thumbnail_file:
-            thumb_url = upload_thumbnail(thumbnail_file)
-
+        from .supabase_storage import upload_video as sb_upload, upload_thumbnail
+        video_url = sb_upload(video_file)
+        thumb_url = upload_thumbnail(thumbnail_file) if thumbnail_file else ''
         video = Video.objects.create(
             user=request.user,
             video_url=video_url,
             thumbnail_url=thumb_url,
-            caption=caption,
-            visibility=visibility,
+            caption=request.data.get('caption', ''),
+            visibility=request.data.get('visibility', 'public'),
         )
         return Response(VideoSerializer(video, context={'request': request}).data, status=201)
-
     except Exception as e:
         return Response({'detail': f'Upload failed: {str(e)}'}, status=500)
 
@@ -158,6 +122,33 @@ def delete_video(request, video_id):
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
+def view_video(request, video_id):
+    """Called after 3 seconds of watching — counts view + credits ad earnings."""
+    try:
+        video = Video.objects.get(pk=video_id, is_deleted=False)
+    except Video.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=404)
+
+    # Increment view count
+    Video.objects.filter(pk=video_id).update(views_count=M.F('views_count') + 1)
+
+    # Credit monetized user with ad earnings
+    if request.user.is_monetized:
+        # Use ad_link from video if it's an ad, otherwise pick any active ad
+        ad = video.ad_link if (video.is_ad and video.ad_link) else AdLink.objects.filter(is_active=True).first()
+        if ad:
+            try:
+                AdView.objects.create(user=request.user, ad_link=ad, video=video)
+                # earnings credited automatically in AdView.save()
+            except Exception:
+                pass
+
+    video.refresh_from_db()
+    return Response({'counted': True, 'views': video.views_count})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def like_video(request, video_id):
     try:
         video = Video.objects.get(pk=video_id, is_deleted=False)
@@ -172,10 +163,7 @@ def like_video(request, video_id):
     Video.objects.filter(pk=video_id).update(likes_count=M.F('likes_count') + 1)
     User.objects.filter(pk=video.user.pk).update(likes_count=M.F('likes_count') + 1)
     if video.user != request.user:
-        Notification.objects.create(
-            user=video.user, sender=request.user, type='like',
-            text=f'@{request.user.username} liked your video'
-        )
+        Notification.objects.create(user=video.user, sender=request.user, type='like', text=f'@{request.user.username} liked your video')
     return Response({'liked': True})
 
 
@@ -203,22 +191,16 @@ def comments(request, video_id):
     except Video.DoesNotExist:
         return Response({'detail': 'Not found'}, status=404)
     if request.method == 'GET':
-        qs = video.comments.filter(parent=None).select_related('user').order_by('-created_at')
-        return Response(CommentSerializer(qs, many=True).data)
+        return Response(CommentSerializer(video.comments.filter(parent=None).select_related('user').order_by('-created_at'), many=True).data)
     ser = CommentSerializer(data=request.data)
     if not ser.is_valid():
         return Response(ser.errors, status=400)
     c = ser.save(user=request.user, video=video)
     Video.objects.filter(pk=video_id).update(comments_count=M.F('comments_count') + 1)
     if video.user != request.user:
-        Notification.objects.create(
-            user=video.user, sender=request.user, type='comment',
-            text=f'@{request.user.username} commented: {c.text[:50]}'
-        )
+        Notification.objects.create(user=video.user, sender=request.user, type='comment', text=f'@{request.user.username} commented: {c.text[:50]}')
     return Response(CommentSerializer(c).data, status=201)
 
-
-# ── Profile ───────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticatedOrReadOnly])
@@ -227,15 +209,10 @@ def user_profile(request, username):
         user = User.objects.get(username=username, is_active=True)
     except User.DoesNotExist:
         return Response({'detail': 'User not found'}, status=404)
-    is_following = (Follow.objects.filter(follower=request.user, following=user).exists()
-                    if request.user.is_authenticated else False)
-    videos = Video.objects.filter(
-        user=user, visibility='public', is_deleted=False
-    ).order_by('-created_at')[:30]
-    return Response({
-        'user': {**UserPublicSerializer(user).data, 'is_following': is_following},
-        'videos': VideoSerializer(videos, many=True, context={'request': request}).data,
-    })
+    is_following = Follow.objects.filter(follower=request.user, following=user).exists() if request.user.is_authenticated else False
+    videos = Video.objects.filter(user=user, visibility='public', is_deleted=False).order_by('-created_at')[:30]
+    return Response({'user': {**UserPublicSerializer(user).data, 'is_following': is_following},
+                     'videos': VideoSerializer(videos, many=True, context={'request': request}).data})
 
 
 @api_view(['POST'])
@@ -255,14 +232,9 @@ def follow_user(request, username):
         return Response({'following': False})
     User.objects.filter(pk=target.pk).update(followers_count=M.F('followers_count') + 1)
     User.objects.filter(pk=request.user.pk).update(following_count=M.F('following_count') + 1)
-    Notification.objects.create(
-        user=target, sender=request.user, type='follow',
-        text=f'@{request.user.username} started following you'
-    )
+    Notification.objects.create(user=target, sender=request.user, type='follow', text=f'@{request.user.username} started following you')
     return Response({'following': True})
 
-
-# ── Earnings ──────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
@@ -278,11 +250,7 @@ def earnings(request):
         ds = day.replace(hour=0, minute=0, second=0, microsecond=0)
         de = ds + timedelta(days=1)
         dv = views.filter(created_at__gte=ds, created_at__lt=de)
-        daily.append({
-            'date': day.strftime('%a'),
-            'amount': float(dv.aggregate(t=M.Sum('creator_revenue'))['t'] or 0),
-            'ads': dv.count()
-        })
+        daily.append({'date': day.strftime('%a'), 'amount': float(dv.aggregate(t=M.Sum('creator_revenue'))['t'] or 0), 'ads': dv.count()})
     return Response({
         'total_earnings': float(u.total_earnings),
         'balance': float(u.balance),
@@ -303,11 +271,8 @@ def request_withdrawal(request):
         return Response({'detail': 'Minimum withdrawal is KES 1,000'}, status=400)
     if float(request.user.balance) < amount:
         return Response({'detail': 'Insufficient balance'}, status=400)
-    WithdrawalRequest.objects.create(
-        user=request.user, amount=amount,
-        method=request.data.get('method', 'mpesa'),
-        account_details=request.data.get('account', ''),
-    )
+    WithdrawalRequest.objects.create(user=request.user, amount=amount,
+        method=request.data.get('method', 'mpesa'), account_details=request.data.get('account', ''))
     User.objects.filter(pk=request.user.pk).update(balance=M.F('balance') - amount)
     return Response({'detail': 'Withdrawal submitted successfully'})
 
@@ -324,3 +289,14 @@ def notifications(request):
 @permission_classes([permissions.IsAuthenticatedOrReadOnly])
 def active_ads(request):
     return Response(AdLinkSerializer(AdLink.objects.filter(is_active=True), many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def record_ad_view(request, ad_id):
+    try:
+        ad = AdLink.objects.get(pk=ad_id, is_active=True)
+    except AdLink.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=404)
+    AdView.objects.create(user=request.user, ad_link=ad)
+    return Response({'recorded': True})
