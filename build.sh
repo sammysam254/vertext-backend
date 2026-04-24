@@ -83,6 +83,7 @@ if not AdLink.objects.filter(is_active=True).exists():
         revenue_per_view=0.000100,
         is_active=True,
         show_frequency=7,
+        thumbnail_url='',
     )
     print('  ✅ Default ad link created (KES 0.013 per 1000 views)')
 "
