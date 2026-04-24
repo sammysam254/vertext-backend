@@ -1,13 +1,13 @@
 from pathlib import Path
 from datetime import timedelta
-import os
 import dj_database_url
+from decouple import config, Csv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'vertext-secret-2024-change-me')
-DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
+SECRET_KEY = config('SECRET_KEY', default='vertext-secret-2024-change-me')
+DEBUG = config('DEBUG', default=False, cast=bool)
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*', cast=Csv())
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -50,41 +50,17 @@ TEMPLATES = [{
     ]},
 }]
 
-# ── DATABASE — Supabase PostgreSQL ─────────────────────────────────────────
-# Render env var: SUPABASE_DB_URL
-# Value: postgresql://postgres.mzicoxnygbpmyhntcfsm:PASSWORD@aws-0-eu-central-1.pooler.supabase.com:6543/postgres
-# Get it from: Supabase Dashboard > Project Settings > Database > Connection string > URI (Transaction pooler)
+# Supabase PostgreSQL database
+SUPABASE_DB_URL = config('SUPABASE_DB_URL', default=None)
+DATABASE_URL = config('DATABASE_URL', default=None)
 
-_db_url = (
-    os.environ.get('SUPABASE_DB_URL') or
-    os.environ.get('DATABASE_URL') or
-    ''
-)
+DB_URL = SUPABASE_DB_URL or DATABASE_URL
 
-if _db_url:
-    _config = dj_database_url.parse(_db_url, conn_max_age=60)
-    # Force SSL for Supabase
-    _config.setdefault('OPTIONS', {})
-    _config['OPTIONS']['sslmode'] = 'require'
-    # Disable server-side cursors for Supabase connection pooler compatibility
-    _config['DISABLE_SERVER_SIDE_CURSORS'] = True
-    DATABASES = {'default': _config}
-    print(f"[DB] Connected to Supabase: {_config.get('HOST', 'unknown')}")
+if DB_URL:
+    DATABASES = {'default': dj_database_url.parse(DB_URL, conn_max_age=600, ssl_require=True)}
 else:
-    print("[DB] WARNING: No database URL found — using SQLite fallback")
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+    DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
 
-# ── Supabase Storage ────────────────────────────────────────────────────────
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://mzicoxnygbpmyhntcfsm.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16aWNveG55Z2JwbXlobnRjZnNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDY3MDcsImV4cCI6MjA5MjM4MjcwN30.eu8jeQOxsz2SzL2wnguY0jeKOXh1ybNnlBgr19Xv-KY')
-SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', SUPABASE_ANON_KEY)
-
-# ── REST Framework ──────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework_simplejwt.authentication.JWTAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticatedOrReadOnly'],
@@ -103,6 +79,10 @@ CORS_ALLOW_CREDENTIALS = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Media files stored in Supabase Storage via public URL
+SUPABASE_URL = config('SUPABASE_URL', default='https://mzicoxnygbpmyhntcfsm.supabase.co')
+SUPABASE_ANON_KEY = config('SUPABASE_ANON_KEY', default='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16aWNveG55Z2JwbXlobnRjZnNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDY3MDcsImV4cCI6MjA5MjM4MjcwN30.eu8jeQOxsz2SzL2wnguY0jeKOXh1ybNnlBgr19Xv-KY')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'

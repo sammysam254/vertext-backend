@@ -7,14 +7,18 @@ class User(AbstractUser):
     avatar = models.URLField(max_length=500, blank=True)
     is_monetized = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+    # 'none' | 'blue' (first 50 new users) | 'black' (existing users)
+    verification_type = models.CharField(max_length=10, default='none')
     is_suspended = models.BooleanField(default=False)
     total_earnings = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     balance = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     followers_count = models.PositiveIntegerField(default=0)
     following_count = models.PositiveIntegerField(default=0)
     likes_count = models.PositiveIntegerField(default=0)
+
     class Meta:
         db_table = 'vertext_user'
+
 
 class Follow(models.Model):
     follower = models.ForeignKey(User, related_name='following', on_delete=models.CASCADE)
@@ -22,6 +26,7 @@ class Follow(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         unique_together = ('follower', 'following')
+
 
 class AdLink(models.Model):
     PLATFORM_CHOICES = [('monetag','Monetag'),('adsense','Google AdSense'),('custom','Custom')]
@@ -34,6 +39,7 @@ class AdLink(models.Model):
     is_active = models.BooleanField(default=True)
     show_frequency = models.PositiveIntegerField(default=7)
     created_at = models.DateTimeField(auto_now_add=True)
+
 
 class Video(models.Model):
     VISIBILITY = [('public','Public'),('friends','Friends'),('private','Private')]
@@ -54,12 +60,14 @@ class Video(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+
 class Like(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     video = models.ForeignKey(Video, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         unique_together = ('user', 'video')
+
 
 class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -71,12 +79,14 @@ class Comment(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+
 class Save(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     video = models.ForeignKey(Video, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         unique_together = ('user', 'video')
+
 
 class AdView(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ad_views')
@@ -98,6 +108,7 @@ class AdView(models.Model):
                 total_earnings=F('total_earnings') + self.creator_revenue
             )
 
+
 class Notification(models.Model):
     TYPES = [('like','Like'),('comment','Comment'),('follow','Follow'),('earnings','Earnings')]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -106,6 +117,16 @@ class Notification(models.Model):
     text = models.CharField(max_length=300)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class VerificationRequest(models.Model):
+    STATUS = [('pending','Pending'),('approved','Approved'),('rejected','Rejected')]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='verification_requests')
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
 
 class WithdrawalRequest(models.Model):
     STATUS = [('pending','Pending'),('approved','Approved'),('rejected','Rejected')]

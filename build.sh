@@ -14,7 +14,6 @@ python -c "
 import os
 db = os.environ.get('SUPABASE_DB_URL') or os.environ.get('DATABASE_URL') or ''
 if db:
-    # Mask password for logging
     parts = db.split('@')
     safe = parts[0].split(':')[0] + ':***@' + parts[1] if len(parts) > 1 else '***'
     print(f'  ✅ DB URL found: {safe}')
@@ -47,7 +46,6 @@ echo "👑 Setting up admin user..."
 python manage.py shell -c "
 from vertext_app.models import User
 try:
-    # Clean up any conflicting records
     User.objects.filter(email='sammyseth260@gmail.com').exclude(username='samson').delete()
     u, created = User.objects.get_or_create(username='samson')
     u.email = 'sammyseth260@gmail.com'
@@ -59,7 +57,7 @@ try:
     u.bio = 'Vertext Founder 👑'
     u.set_password('41516512#Sam')
     u.save()
-    print(f'  ✅ Admin: samson / 41516512#Sam ({'created' if created else 'updated'})')
+    print(f'  ✅ Admin: samson / 41516512#Sam ({\"created\" if created else \"updated\"})')
 except Exception as e:
     print(f'  ❌ Admin error: {e}')
 
@@ -74,7 +72,6 @@ try:
 except Exception as e:
     print(f'  ❌ Demo error: {e}')
 
-# Create default Ad Link so earnings work immediately
 from vertext_app.models import AdLink
 if not AdLink.objects.filter(is_active=True).exists():
     AdLink.objects.create(
@@ -85,7 +82,7 @@ if not AdLink.objects.filter(is_active=True).exists():
         show_frequency=7,
         thumbnail_url='',
     )
-    print('  ✅ Default ad link created (KES 0.013 per 1000 views)')
+    print('  ✅ Default ad link created')
 "
 
 echo ""
