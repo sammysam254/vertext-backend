@@ -55,7 +55,7 @@ def register(request):
     user.save(update_fields=['verification_type'])
 
     return Response({
-        'tokens': get_tokens(user),
+        'access': get_tokens(user).get('access', ''),
         'user': UserPrivateSerializer(user).data,
         'can_claim_blue': user.verification_type == 'eligible_blue',
     }, status=201)
@@ -78,7 +78,7 @@ def login(request):
         return Response({'error': 'Invalid credentials'}, status=401)
     if user.is_suspended:
         return Response({'error': 'Account suspended'}, status=403)
-    return Response({'tokens': get_tokens(user), 'user': UserPrivateSerializer(user).data})
+    return Response({'access': get_tokens(user).get('access', ''), 'user': UserPrivateSerializer(user).data})
 
 
 @api_view(['POST'])
