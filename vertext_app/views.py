@@ -54,8 +54,10 @@ def register(request):
         user.verification_type = 'none'
     user.save(update_fields=['verification_type'])
 
+    tokens = get_tokens(user)
     return Response({
-        'access': get_tokens(user).get('access', ''),
+        'access': tokens['access'],
+        'refresh': tokens['refresh'],
         'user': UserPrivateSerializer(user).data,
         'can_claim_blue': user.verification_type == 'eligible_blue',
     }, status=201)
@@ -78,7 +80,8 @@ def login(request):
         return Response({'error': 'Invalid credentials'}, status=401)
     if user.is_suspended:
         return Response({'error': 'Account suspended'}, status=403)
-    return Response({'access': get_tokens(user).get('access', ''), 'user': UserPrivateSerializer(user).data})
+    tokens = get_tokens(user)
+    return Response({'access': tokens['access'], 'refresh': tokens['refresh'], 'user': UserPrivateSerializer(user).data})
 
 
 @api_view(['POST'])
@@ -201,7 +204,17 @@ def like_video(request, video_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def view_video(request, video_id):
+    from django.core.cache import cache
+    user_id = request.user.id if request.user.is_authenticated else None
+    # Use cache to track unique views per user per video
+    cache_key = f'view_{video_id}_{user_id or request.META.get("REMOTE_ADDR", "anon")}'
+    already_viewed = cache.get(cache_key)
+    if already_viewed:
+        return Response({'counted': False})
+    # Mark as viewed for 24 hours
+    cache.set(cache_key, True, 60 * 60 * 24)
     Video.objects.filter(pk=video_id).update(views_count=F('views_count') + 1)
+    counted = True
     return Response({'success': True})
 
 
@@ -343,6 +356,177 @@ def request_withdrawal(request):
     )
     User.objects.filter(pk=request.user.id).update(balance=F('balance') - amount)
     return Response({'success': True})
+
+
+# ── Verification application ─────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def apply_verification(request):
+    from .models import PlatformSettings
+    # Check if verification is open
+    try:
+        cfg = PlatformSettings.objects.first()
+        if cfg and not cfg.verification_open:
+            return Response({'error': 'Verification applications are currently closed'}, status=400)
+    except:
+        pass
+    
+    user = request.user
+    if user.is_verified:
+        return Response({'error': 'Already verified'}, status=400)
+    
+    # Check eligibility
+    if user.followers_count < 60:
+        return Response({'error': f'You need at least 60 followers. You have {user.followers_count}.'}, status=400)
+    
+    total_views = Video.objects.filter(user=user, is_deleted=False).aggregate(
+        total=__import__('django.db.models', fromlist=['Sum']).Sum('views_count')
+    )['total'] or 0
+    
+    if total_views < 5000:
+        return Response({'error': f'You need at least 5,000 total views. You have {total_views}.'}, status=400)
+    
+    reason = request.data.get('reason', '').strip()
+    if not reason:
+        return Response({'error': 'Please provide a reason'}, status=400)
+    
+    # Check no pending request
+    if VerificationRequest.objects.filter(user=user, status='pending').exists():
+        return Response({'error': 'You already have a pending application'}, status=400)
+    
+    VerificationRequest.objects.create(user=user, reason=reason)
+    return Response({'success': True})
+
+
+# ── Admin endpoints ────────────────────────────────────────────────────────────
+
+def is_admin(user):
+    return user.is_authenticated and (user.is_staff or user.username == 'samson')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_stats(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    from django.db.models import Sum
+    return Response({
+        'total_users': User.objects.count(),
+        'total_videos': Video.objects.filter(is_deleted=False).count(),
+        'total_views': Video.objects.aggregate(t=Sum('views_count'))['t'] or 0,
+        'monetized_users': User.objects.filter(is_monetized=True).count(),
+        'pending_verifications': VerificationRequest.objects.filter(status='pending').count(),
+        'total_ad_revenue': str(AdView.objects.aggregate(t=Sum('gross_revenue'))['t'] or 0),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_users(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    users = User.objects.order_by('-date_joined')[:100]
+    return Response(UserPublicSerializer(users, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_suspend_user(request, user_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        u = User.objects.get(pk=user_id)
+        u.is_suspended = request.data.get('suspended', True)
+        u.save(update_fields=['is_suspended'])
+        return Response({'success': True})
+    except User.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_monetize_user(request, user_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        u = User.objects.get(pk=user_id)
+        u.is_monetized = request.data.get('monetized', True)
+        u.save(update_fields=['is_monetized'])
+        return Response({'success': True})
+    except User.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_verification_requests(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    reqs = VerificationRequest.objects.filter(status='pending').select_related('user').order_by('-created_at')
+    data = []
+    for r in reqs:
+        from django.db.models import Sum
+        total_views = Video.objects.filter(user=r.user, is_deleted=False).aggregate(t=Sum('views_count'))['t'] or 0
+        data.append({
+            'id': r.id,
+            'username': r.user.username,
+            'followers_count': r.user.followers_count,
+            'total_views': total_views,
+            'reason': r.reason,
+            'created_at': str(r.created_at),
+        })
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_approve_verification(request, req_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        r = VerificationRequest.objects.get(pk=req_id)
+        r.status = 'approved'
+        r.save()
+        r.user.is_verified = True
+        r.user.verification_type = 'blue'
+        r.user.save(update_fields=['is_verified', 'verification_type'])
+        return Response({'success': True})
+    except VerificationRequest.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_reject_verification(request, req_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        r = VerificationRequest.objects.get(pk=req_id)
+        r.status = 'rejected'
+        r.save()
+        return Response({'success': True})
+    except VerificationRequest.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def admin_settings(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    from .models import PlatformSettings
+    cfg, _ = PlatformSettings.objects.get_or_create(pk=1)
+    if request.method == 'POST':
+        for key in ['verification_open', 'monetization_open', 'registration_open']:
+            if key in request.data:
+                setattr(cfg, key, request.data[key])
+        cfg.save()
+    return Response({
+        'verification_open': cfg.verification_open,
+        'monetization_open': cfg.monetization_open,
+        'registration_open': cfg.registration_open,
+    })
 
 
 # ── Username-based profile helpers (used by mobile app) ──────────────────────

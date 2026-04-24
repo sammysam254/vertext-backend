@@ -137,3 +137,12 @@ class WithdrawalRequest(models.Model):
     status = models.CharField(max_length=20, choices=STATUS, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
+
+
+class PlatformSettings(models.Model):
+    verification_open = models.BooleanField(default=False)
+    monetization_open = models.BooleanField(default=True)
+    registration_open = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = 'Platform Settings'

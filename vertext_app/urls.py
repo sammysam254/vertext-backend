@@ -7,6 +7,7 @@ urlpatterns = [
     path('auth/me/', views.me),
     path('auth/claim-blue-badge/', views.claim_blue_badge),
     path('auth/submit-verification/', views.submit_verification),
+    path('auth/apply-verification/', views.apply_verification),
     path('profile/update/', views.update_profile),
     path('profile/<int:user_id>/', views.user_profile),
     path('profile/<int:user_id>/follow/', views.follow_user),
@@ -26,4 +27,13 @@ urlpatterns = [
     path('ads/', views.active_ads),
     path('ads/<int:ad_id>/view/', views.record_ad_view),
     path('earnings/withdraw/', views.request_withdrawal),
+    # Admin endpoints
+    path('admin/stats/', views.admin_stats),
+    path('admin/users/', views.admin_users),
+    path('admin/users/<int:user_id>/suspend/', views.admin_suspend_user),
+    path('admin/users/<int:user_id>/monetize/', views.admin_monetize_user),
+    path('admin/verification-requests/', views.admin_verification_requests),
+    path('admin/verification-requests/<int:req_id>/approve/', views.admin_approve_verification),
+    path('admin/verification-requests/<int:req_id>/reject/', views.admin_reject_verification),
+    path('admin/settings/', views.admin_settings),
 ]
