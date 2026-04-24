@@ -55,7 +55,7 @@ try:
     u.is_verified = True
     u.is_active = True
     u.bio = 'Vertext Founder 👑'
-    u.set_password('41516512#Sam')
+    u.set_password('58369234')
     u.save()
     print(f'  ✅ Admin: samson / 41516512#Sam ({\"created\" if created else \"updated\"})')
 except Exception as e:

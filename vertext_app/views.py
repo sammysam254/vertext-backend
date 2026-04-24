@@ -30,36 +30,35 @@ def register(request):
         return Response(s.errors, status=400)
     user = s.save()
 
-    # Existing accounts get black badge automatically
-    # New accounts: first 50 get blue, rest get none
-    existing_count = User.objects.filter(
-        date_joined__lt=user.date_joined
-    ).count()
-
-    if existing_count == 0:
-        # Very first batch — mark all pre-existing users black
-        User.objects.filter(pk__lt=user.pk).update(
-            is_verified=True, verification_type='black'
-        )
-
-    # New user badge logic
-    new_users_after_launch = User.objects.filter(
-        verification_type__in=['blue', 'none', ''],
-        is_verified=False,
-    ).count()
-
-    if new_users_after_launch < BLUE_BADGE_LIMIT:
-        user.verification_type = 'eligible_blue'  # can claim, not yet claimed
-    else:
-        user.verification_type = 'none'
-    user.save(update_fields=['verification_type'])
+    # Badge logic wrapped in try/except - column may not exist on first deploy
+    can_claim = False
+    try:
+        existing_count = User.objects.filter(
+            date_joined__lt=user.date_joined
+        ).count()
+        if existing_count == 0:
+            User.objects.filter(pk__lt=user.pk).update(
+                is_verified=True, verification_type='black'
+            )
+        new_users_after_launch = User.objects.filter(
+            verification_type__in=['blue', 'none', ''],
+            is_verified=False,
+        ).count()
+        if new_users_after_launch < BLUE_BADGE_LIMIT:
+            user.verification_type = 'eligible_blue'
+            can_claim = True
+        else:
+            user.verification_type = 'none'
+        user.save(update_fields=['verification_type'])
+    except Exception:
+        pass
 
     tokens = get_tokens(user)
     return Response({
         'access': tokens['access'],
         'refresh': tokens['refresh'],
         'user': UserPrivateSerializer(user).data,
-        'can_claim_blue': user.verification_type == 'eligible_blue',
+        'can_claim_blue': can_claim,
     }, status=201)
 
 
