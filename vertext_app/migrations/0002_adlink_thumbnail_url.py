@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql="ALTER TABLE vertext_app_adlink ADD COLUMN IF NOT EXISTS thumbnail_url varchar(500) NOT NULL DEFAULT '';",
+            sql="ALTER TABLE vertext_app_adlink ADD COLUMN IF NOT EXISTS thumbnail_url varchar(500) DEFAULT '' NOT NULL;",
             reverse_sql="ALTER TABLE vertext_app_adlink DROP COLUMN IF EXISTS thumbnail_url;",
         ),
     ]
