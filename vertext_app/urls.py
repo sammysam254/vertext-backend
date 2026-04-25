@@ -36,4 +36,8 @@ urlpatterns = [
     path('admin/verification-requests/<int:req_id>/approve/', views.admin_approve_verification),
     path('admin/verification-requests/<int:req_id>/reject/', views.admin_reject_verification),
     path('admin/settings/', views.admin_settings),
+    path('admin/users/<int:user_id>/verify/', views.admin_verify_user),
+    path('admin/ads/', views.admin_manage_ads),
+    path('admin/ads/<int:ad_id>/toggle/', views.admin_toggle_ad),
+    path('admin/ads/<int:ad_id>/delete/', views.admin_delete_ad),
 ]

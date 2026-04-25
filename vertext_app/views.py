@@ -509,6 +509,80 @@ def admin_reject_verification(request, req_id):
         return Response({'error': 'Not found'}, status=404)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_verify_user(request, user_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        u = User.objects.get(pk=user_id)
+        verified = request.data.get('verified', True)
+        u.is_verified = verified
+        u.verification_type = 'blue' if verified else 'none'
+        u.save(update_fields=['is_verified', 'verification_type'])
+        return Response({'success': True, 'is_verified': verified})
+    except User.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def admin_manage_ads(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    if request.method == 'POST':
+        title = request.data.get('title', '').strip()
+        if not title:
+            return Response({'error': 'Title required'}, status=400)
+        ad = AdLink.objects.create(
+            title=title,
+            platform=request.data.get('platform', 'monetag'),
+            ad_url=request.data.get('ad_url', ''),
+            ad_code=request.data.get('ad_code', ''),
+            thumbnail_url=request.data.get('thumbnail_url', ''),
+            revenue_per_view=float(request.data.get('revenue_per_view', 0.0001)),
+            show_frequency=int(request.data.get('show_frequency', 7)),
+            is_active=True,
+        )
+        return Response({
+            'id': ad.id, 'title': ad.title, 'platform': ad.platform,
+            'ad_url': ad.ad_url, 'revenue_per_view': str(ad.revenue_per_view),
+            'show_frequency': ad.show_frequency, 'is_active': ad.is_active,
+        }, status=201)
+    ads = AdLink.objects.order_by('-created_at')
+    return Response([{
+        'id': a.id, 'title': a.title, 'platform': a.platform,
+        'ad_url': a.ad_url, 'revenue_per_view': str(a.revenue_per_view),
+        'show_frequency': a.show_frequency, 'is_active': a.is_active,
+    } for a in ads])
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_toggle_ad(request, ad_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        ad = AdLink.objects.get(pk=ad_id)
+        ad.is_active = request.data.get('is_active', not ad.is_active)
+        ad.save(update_fields=['is_active'])
+        return Response({'success': True, 'is_active': ad.is_active})
+    except AdLink.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_delete_ad(request, ad_id):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    try:
+        AdLink.objects.get(pk=ad_id).delete()
+        return Response({'success': True})
+    except AdLink.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def admin_settings(request):
