@@ -52,9 +52,12 @@ class RegisterSerializer(serializers.Serializer):
 
 
 class VideoSerializer(serializers.ModelSerializer):
-    user = UserPublicSerializer(read_only=True)
+    user = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
+
+    def get_user(self, obj):
+        return UserPublicSerializer(obj.user, context=self.context).data
 
     class Meta:
         model = Video
