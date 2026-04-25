@@ -154,7 +154,7 @@ def upload_video(request):
     return Response(VideoSerializer(video, context={'request': request}).data, status=201)
 
 
-@api_view(['DELETE'])
+@api_view(['DELETE', 'POST'])
 @permission_classes([IsAuthenticated])
 def delete_video(request, video_id):
     try:
@@ -203,18 +203,28 @@ def like_video(request, video_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def view_video(request, video_id):
-    from django.core.cache import cache
-    user_id = request.user.id if request.user.is_authenticated else None
-    # Use cache to track unique views per user per video
-    cache_key = f'view_{video_id}_{user_id or request.META.get("REMOTE_ADDR", "anon")}'
-    already_viewed = cache.get(cache_key)
-    if already_viewed:
-        return Response({'counted': False})
-    # Mark as viewed for 24 hours
-    cache.set(cache_key, True, 60 * 60 * 24)
-    Video.objects.filter(pk=video_id).update(views_count=F('views_count') + 1)
-    counted = True
-    return Response({'success': True})
+    user_id = str(request.user.id)
+    # Use DB for persistent unique view tracking per user per video
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vertext_app_videoview (
+                id bigserial PRIMARY KEY,
+                video_id bigint NOT NULL,
+                viewer_key varchar(100) NOT NULL,
+                created_at timestamp with time zone DEFAULT now(),
+                UNIQUE(video_id, viewer_key)
+            )
+        ''')
+        try:
+            cursor.execute(
+                'INSERT INTO vertext_app_videoview (video_id, viewer_key) VALUES (%s, %s)',
+                [video_id, user_id]
+            )
+            Video.objects.filter(pk=video_id).update(views_count=F('views_count') + 1)
+            return Response({'counted': True})
+        except Exception:
+            return Response({'counted': False})
 
 
 @api_view(['GET', 'POST'])
@@ -653,57 +663,3 @@ def user_videos_by_username(request, username):
         return Response({'error': 'Not found'}, status=404)
     videos = Video.objects.filter(user=user, is_deleted=False, visibility='public').order_by('-created_at')
     return Response(VideoSerializer(videos, many=True, context={'request': request}).data)
-
-
-# ── Fixed upload view (replaces the broken one above) ────────────────────────
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def upload_video_v2(request):
-    video_file = request.FILES.get('video_file')
-    if not video_file:
-        return Response({'error': 'No video file provided'}, status=400)
-    try:
-        from .supabase_storage import upload_video as sup_upload_video, upload_thumbnail
-        video_url = sup_upload_video(video_file)
-        thumbnail_url = ''
-        thumb_file = request.FILES.get('thumbnail')
-        if thumb_file:
-            thumbnail_url = upload_thumbnail(thumb_file)
-    except Exception as e:
-        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
-    video = Video.objects.create(
-        user=request.user,
-        video_url=video_url,
-        thumbnail_url=thumbnail_url,
-        caption=request.data.get('caption', ''),
-        visibility=request.data.get('visibility', 'public'),
-    )
-    return Response(VideoSerializer(video, context={'request': request}).data, status=201)
-
-
-# ── Fixed upload view (replaces the broken one above) ────────────────────────
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def upload_video_v2(request):
-    video_file = request.FILES.get('video_file')
-    if not video_file:
-        return Response({'error': 'No video file provided'}, status=400)
-    try:
-        from .supabase_storage import upload_video as sup_upload_video, upload_thumbnail
-        video_url = sup_upload_video(video_file)
-        thumbnail_url = ''
-        thumb_file = request.FILES.get('thumbnail')
-        if thumb_file:
-            thumbnail_url = upload_thumbnail(thumb_file)
-    except Exception as e:
-        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
-    video = Video.objects.create(
-        user=request.user,
-        video_url=video_url,
-        thumbnail_url=thumbnail_url,
-        caption=request.data.get('caption', ''),
-        visibility=request.data.get('visibility', 'public'),
-    )
-    return Response(VideoSerializer(video, context={'request': request}).data, status=201)

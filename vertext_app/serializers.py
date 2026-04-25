@@ -3,10 +3,18 @@ from .models import User, Video, Comment, Like, Save, AdLink, Notification
 
 
 class UserPublicSerializer(serializers.ModelSerializer):
+    is_followed = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = ['id', 'username', 'avatar', 'is_verified', 'verification_type',
-                  'followers_count', 'following_count', 'likes_count', 'bio']
+                  'followers_count', 'following_count', 'likes_count', 'bio', 'is_followed']
+
+    def get_is_followed(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return Follow.objects.filter(follower=request.user, following=obj).exists()
+        return False
 
 
 class UserPrivateSerializer(serializers.ModelSerializer):
