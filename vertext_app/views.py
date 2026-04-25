@@ -161,8 +161,28 @@ def delete_video(request, video_id):
         video = Video.objects.get(pk=video_id, user=request.user)
     except Video.DoesNotExist:
         return Response({'error': 'Not found'}, status=404)
-    video.is_deleted = True
-    video.save()
+
+    # Delete from Supabase storage permanently
+    from .supabase_storage import SUPABASE_URL, VIDEO_BUCKET, THUMB_BUCKET, _client
+    def extract_path(url, bucket):
+        marker = f'/object/public/{bucket}/'
+        if url and marker in url:
+            return url.split(marker, 1)[1]
+        return None
+
+    try:
+        client = _client()
+        video_path = extract_path(video.video_url, VIDEO_BUCKET)
+        if video_path:
+            client.from_(VIDEO_BUCKET).remove([video_path])
+        thumb_path = extract_path(video.thumbnail_url, THUMB_BUCKET)
+        if thumb_path:
+            client.from_(THUMB_BUCKET).remove([thumb_path])
+    except Exception as e:
+        print(f'Supabase delete error: {e}')
+
+    # Delete from DB permanently
+    video.delete()
     return Response({'success': True})
 
 
