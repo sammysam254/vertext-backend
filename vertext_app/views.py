@@ -663,3 +663,28 @@ def user_videos_by_username(request, username):
         return Response({'error': 'Not found'}, status=404)
     videos = Video.objects.filter(user=user, is_deleted=False, visibility='public').order_by('-created_at')
     return Response(VideoSerializer(videos, many=True, context={'request': request}).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_video_v2(request):
+    video_file = request.FILES.get('video_file')
+    if not video_file:
+        return Response({'error': 'No video file provided'}, status=400)
+    try:
+        from .supabase_storage import upload_video as sup_video, upload_thumbnail
+        video_url = sup_video(video_file)
+        thumbnail_url = ''
+        thumb = request.FILES.get('thumbnail')
+        if thumb:
+            thumbnail_url = upload_thumbnail(thumb)
+    except Exception as e:
+        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
+    video = Video.objects.create(
+        user=request.user,
+        video_url=video_url,
+        thumbnail_url=thumbnail_url,
+        caption=request.data.get('caption', ''),
+        visibility=request.data.get('visibility', 'public'),
+    )
+    return Response(VideoSerializer(video, context={'request': request}).data, status=201)
