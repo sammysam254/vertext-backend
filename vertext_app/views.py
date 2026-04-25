@@ -680,3 +680,30 @@ def upload_video_v2(request):
         visibility=request.data.get('visibility', 'public'),
     )
     return Response(VideoSerializer(video, context={'request': request}).data, status=201)
+
+
+# ── Fixed upload view (replaces the broken one above) ────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_video_v2(request):
+    video_file = request.FILES.get('video_file')
+    if not video_file:
+        return Response({'error': 'No video file provided'}, status=400)
+    try:
+        from .supabase_storage import upload_video as sup_upload_video, upload_thumbnail
+        video_url = sup_upload_video(video_file)
+        thumbnail_url = ''
+        thumb_file = request.FILES.get('thumbnail')
+        if thumb_file:
+            thumbnail_url = upload_thumbnail(thumb_file)
+    except Exception as e:
+        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
+    video = Video.objects.create(
+        user=request.user,
+        video_url=video_url,
+        thumbnail_url=thumbnail_url,
+        caption=request.data.get('caption', ''),
+        visibility=request.data.get('visibility', 'public'),
+    )
+    return Response(VideoSerializer(video, context={'request': request}).data, status=201)
