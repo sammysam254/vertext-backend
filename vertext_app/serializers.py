@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Video, Comment, Like, Save, AdLink, Notification
+from .models import User, Video, Comment, Like, Save, AdLink, Notification, Follow
 
 
 class UserPublicSerializer(serializers.ModelSerializer):
