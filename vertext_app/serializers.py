@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Video, Comment, Like, Save, AdLink, Notification, Follow
+from .models import User, Video, Comment, Like, Save, AdLink, Notification
 
 
 class UserPublicSerializer(serializers.ModelSerializer):
@@ -52,12 +52,9 @@ class RegisterSerializer(serializers.Serializer):
 
 
 class VideoSerializer(serializers.ModelSerializer):
-    user = serializers.SerializerMethodField()
+    user = UserPublicSerializer(read_only=True)
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-
-    def get_user(self, obj):
-        return UserPublicSerializer(obj.user, context=self.context).data
 
     class Meta:
         model = Video

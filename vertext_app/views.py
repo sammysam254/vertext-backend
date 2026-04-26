@@ -113,14 +113,27 @@ def me(request):
     return Response(UserPrivateSerializer(request.user).data)
 
 
-@api_view(['PATCH'])
+@api_view(['PATCH', 'POST'])
 @permission_classes([IsAuthenticated])
 def update_profile(request):
-    s = UserPrivateSerializer(request.user, data=request.data, partial=True)
-    if s.is_valid():
-        s.save()
-        return Response(s.data)
-    return Response(s.errors, status=400)
+    user = request.user
+    # Handle avatar file upload
+    if 'avatar' in request.FILES:
+        try:
+            from .supabase_storage import upload_avatar
+            avatar_url = upload_avatar(request.FILES['avatar'])
+            user.avatar = avatar_url
+            user.save(update_fields=['avatar'])
+            return Response({'avatar': avatar_url, 'user': UserPrivateSerializer(user).data})
+        except Exception as e:
+            return Response({'error': f'Avatar upload failed: {str(e)}'}, status=500)
+    # Handle text field updates
+    allowed = ['bio', 'username']
+    for field in allowed:
+        if field in request.data:
+            setattr(user, field, request.data[field])
+    user.save(update_fields=[f for f in allowed if f in request.data] or ['bio'])
+    return Response(UserPrivateSerializer(user).data)
 
 
 @api_view(['GET'])
@@ -161,28 +174,8 @@ def delete_video(request, video_id):
         video = Video.objects.get(pk=video_id, user=request.user)
     except Video.DoesNotExist:
         return Response({'error': 'Not found'}, status=404)
-
-    # Delete from Supabase storage permanently
-    from .supabase_storage import SUPABASE_URL, VIDEO_BUCKET, THUMB_BUCKET, _client
-    def extract_path(url, bucket):
-        marker = f'/object/public/{bucket}/'
-        if url and marker in url:
-            return url.split(marker, 1)[1]
-        return None
-
-    try:
-        client = _client()
-        video_path = extract_path(video.video_url, VIDEO_BUCKET)
-        if video_path:
-            client.from_(VIDEO_BUCKET).remove([video_path])
-        thumb_path = extract_path(video.thumbnail_url, THUMB_BUCKET)
-        if thumb_path:
-            client.from_(THUMB_BUCKET).remove([thumb_path])
-    except Exception as e:
-        print(f'Supabase delete error: {e}')
-
-    # Delete from DB permanently
-    video.delete()
+    video.is_deleted = True
+    video.save()
     return Response({'success': True})
 
 
@@ -224,14 +217,16 @@ def like_video(request, video_id):
 @permission_classes([IsAuthenticated])
 def view_video(request, video_id):
     user_id = str(request.user.id)
-    # Use DB for persistent unique view tracking per user per video
-    from django.db import connection
+    device_id = request.data.get('device_id', '')
+    # Use both user_id and device_id for one-device-one-view
+    viewer_key = f"{user_id}_{device_id}" if device_id else user_id
+    from django.db import connection, IntegrityError
     with connection.cursor() as cursor:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vertext_app_videoview (
                 id bigserial PRIMARY KEY,
                 video_id bigint NOT NULL,
-                viewer_key varchar(100) NOT NULL,
+                viewer_key varchar(200) NOT NULL,
                 created_at timestamp with time zone DEFAULT now(),
                 UNIQUE(video_id, viewer_key)
             )
@@ -239,7 +234,7 @@ def view_video(request, video_id):
         try:
             cursor.execute(
                 'INSERT INTO vertext_app_videoview (video_id, viewer_key) VALUES (%s, %s)',
-                [video_id, user_id]
+                [video_id, viewer_key]
             )
             Video.objects.filter(pk=video_id).update(views_count=F('views_count') + 1)
             return Response({'counted': True})
@@ -362,6 +357,51 @@ def record_ad_view(request, ad_id):
             pass
     AdView.objects.create(user=request.user, ad_link=ad, video=video)
     return Response({'success': True})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def earnings(request):
+    from django.db.models import Sum
+    user = request.user
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=7)
+
+    total = float(user.total_earnings or 0)
+    balance = float(user.balance or 0)
+    today_earn = float(AdView.objects.filter(
+        user=user, created_at__gte=today_start
+    ).aggregate(t=Sum('creator_revenue'))['t'] or 0)
+    week_earn = float(AdView.objects.filter(
+        user=user, created_at__gte=week_start
+    ).aggregate(t=Sum('creator_revenue'))['t'] or 0)
+    ad_views = AdView.objects.filter(user=user).count()
+
+    # Daily breakdown last 7 days
+    breakdown = []
+    for i in range(7):
+        day = today_start - timedelta(days=i)
+        day_end = day + timedelta(days=1)
+        amt = float(AdView.objects.filter(
+            user=user, created_at__gte=day, created_at__lt=day_end
+        ).aggregate(t=Sum('creator_revenue'))['t'] or 0)
+        ads = AdView.objects.filter(
+            user=user, created_at__gte=day, created_at__lt=day_end
+        ).count()
+        label = 'Today' if i == 0 else 'Yesterday' if i == 1 else day.strftime('%a')
+        breakdown.append({'date': label, 'amount': amt, 'ads': ads})
+
+    return Response({
+        'total_earnings': total,
+        'balance': balance,
+        'this_week': week_earn,
+        'today': today_earn,
+        'ad_views_count': ad_views,
+        'rate': 0.40,
+        'daily_breakdown': breakdown,
+    })
 
 
 # ── Withdrawal ────────────────────────────────────────────────────────────────
@@ -683,28 +723,3 @@ def user_videos_by_username(request, username):
         return Response({'error': 'Not found'}, status=404)
     videos = Video.objects.filter(user=user, is_deleted=False, visibility='public').order_by('-created_at')
     return Response(VideoSerializer(videos, many=True, context={'request': request}).data)
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def upload_video_v2(request):
-    video_file = request.FILES.get('video_file')
-    if not video_file:
-        return Response({'error': 'No video file provided'}, status=400)
-    try:
-        from .supabase_storage import upload_video as sup_video, upload_thumbnail
-        video_url = sup_video(video_file)
-        thumbnail_url = ''
-        thumb = request.FILES.get('thumbnail')
-        if thumb:
-            thumbnail_url = upload_thumbnail(thumb)
-    except Exception as e:
-        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
-    video = Video.objects.create(
-        user=request.user,
-        video_url=video_url,
-        thumbnail_url=thumbnail_url,
-        caption=request.data.get('caption', ''),
-        visibility=request.data.get('visibility', 'public'),
-    )
-    return Response(VideoSerializer(video, context={'request': request}).data, status=201)
