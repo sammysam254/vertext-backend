@@ -16,7 +16,7 @@ urlpatterns = [
     path('profile/u/<str:username>/follow/', views.follow_user_by_username),
     path('profile/u/<str:username>/videos/', views.user_videos_by_username),
     path('feed/', views.feed),
-    path('videos/upload/', views.upload_video),
+    path('videos/upload/', views.upload_video_v2),
     path('videos/<int:video_id>/delete/', views.delete_video),
     path('videos/<int:video_id>/like/', views.like_video),
     path('videos/<int:video_id>/view/', views.view_video),
