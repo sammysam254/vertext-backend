@@ -120,7 +120,7 @@ def update_profile(request):
     # Handle avatar file upload
     if 'avatar' in request.FILES:
         try:
-            from .supabase_storage import upload_avatar
+            from .r2_storage import upload_avatar
             avatar_url = upload_avatar(request.FILES['avatar'])
             user.avatar = avatar_url
             user.save(update_fields=['avatar'])
