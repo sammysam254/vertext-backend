@@ -793,3 +793,43 @@ def upload_video_v2(request):
         visibility=request.data.get('visibility', 'public'),
     )
     return Response(VideoSerializer(video, context={'request': request}).data, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_delete_all_videos(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    from django.db import connection
+    # Delete from R2
+    r2_deleted = 0
+    try:
+        from .r2_storage import delete_file
+        for video in Video.objects.all():
+            if video.video_url:
+                delete_file(video.video_url)
+                r2_deleted += 1
+            if video.thumbnail_url:
+                delete_file(video.thumbnail_url)
+    except Exception as e:
+        print(f'R2 delete error: {e}')
+    # Delete from Supabase
+    try:
+        from .supabase_storage import _client, VIDEO_BUCKET, THUMB_BUCKET
+        client = _client()
+        for video in Video.objects.filter(video_url__contains='supabase.co'):
+            try:
+                if video.video_url:
+                    path = video.video_url.split(f'/object/public/{VIDEO_BUCKET}/', 1)[-1]
+                    client.from_(VIDEO_BUCKET).remove([path])
+            except: pass
+    except: pass
+    # Delete all from DB
+    count = Video.objects.count()
+    Video.objects.all().delete()
+    # Reset view tracking
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('DELETE FROM vertext_app_videoview')
+    except: pass
+    return Response({'success': True, 'deleted': count, 'message': f'Deleted all {count} videos. Platform reset!'})

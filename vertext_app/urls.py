@@ -41,4 +41,5 @@ urlpatterns = [
     path('admin/ads/<int:ad_id>/toggle/', views.admin_toggle_ad),
     path('admin/ads/<int:ad_id>/delete/', views.admin_delete_ad),
     path('admin/delete-supabase-videos/', views.admin_delete_supabase_videos),
+    path('admin/delete-all-videos/', views.admin_delete_all_videos),
 ]
