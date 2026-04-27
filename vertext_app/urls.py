@@ -16,7 +16,7 @@ urlpatterns = [
     path('profile/u/<str:username>/follow/', views.follow_user_by_username),
     path('profile/u/<str:username>/videos/', views.user_videos_by_username),
     path('feed/', views.feed),
-    path('videos/upload/', views.upload_video_v2),
+    path('videos/upload/', views.upload_video),
     path('videos/<int:video_id>/delete/', views.delete_video),
     path('videos/<int:video_id>/like/', views.like_video),
     path('videos/<int:video_id>/view/', views.view_video),
@@ -40,4 +40,5 @@ urlpatterns = [
     path('admin/ads/', views.admin_manage_ads),
     path('admin/ads/<int:ad_id>/toggle/', views.admin_toggle_ad),
     path('admin/ads/<int:ad_id>/delete/', views.admin_delete_ad),
+    path('admin/delete-supabase-videos/', views.admin_delete_supabase_videos),
 ]

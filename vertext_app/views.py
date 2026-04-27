@@ -672,6 +672,51 @@ def admin_settings(request):
     })
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_delete_supabase_videos(request):
+    if not is_admin(request.user):
+        return Response({'error': 'Forbidden'}, status=403)
+    from django.db.models import Q
+    # Find all videos with Supabase URLs
+    supabase_videos = Video.objects.filter(
+        video_url__contains='supabase.co'
+    )
+    count = supabase_videos.count()
+    # Delete from Supabase storage
+    deleted = 0
+    errors = 0
+    try:
+        from .supabase_storage import _client, VIDEO_BUCKET, THUMB_BUCKET
+        client = _client()
+        for video in supabase_videos:
+            try:
+                if video.video_url and 'supabase.co' in video.video_url:
+                    marker = f'/object/public/{VIDEO_BUCKET}/'
+                    if marker in video.video_url:
+                        path = video.video_url.split(marker, 1)[1]
+                        client.from_(VIDEO_BUCKET).remove([path])
+                if video.thumbnail_url and 'supabase.co' in video.thumbnail_url:
+                    marker = f'/object/public/{THUMB_BUCKET}/'
+                    if marker in video.thumbnail_url:
+                        path = video.thumbnail_url.split(marker, 1)[1]
+                        client.from_(THUMB_BUCKET).remove([path])
+                deleted += 1
+            except Exception:
+                errors += 1
+    except Exception as e:
+        pass
+    # Delete from DB
+    supabase_videos.delete()
+    return Response({
+        'success': True,
+        'deleted': count,
+        'storage_deleted': deleted,
+        'storage_errors': errors,
+        'message': f'Deleted {count} Supabase videos from DB and storage'
+    })
+
+
 # ── Username-based profile helpers (used by mobile app) ──────────────────────
 
 @api_view(['GET'])
@@ -723,28 +768,3 @@ def user_videos_by_username(request, username):
         return Response({'error': 'Not found'}, status=404)
     videos = Video.objects.filter(user=user, is_deleted=False, visibility='public').order_by('-created_at')
     return Response(VideoSerializer(videos, many=True, context={'request': request}).data)
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def upload_video_v2(request):
-    video_file = request.FILES.get('video_file')
-    if not video_file:
-        return Response({'error': 'No video file provided'}, status=400)
-    try:
-        from .r2_storage import upload_video as r2_video, upload_thumbnail as r2_thumb
-        video_url = r2_video(video_file)
-        thumbnail_url = ''
-        thumb = request.FILES.get('thumbnail')
-        if thumb:
-            thumbnail_url = r2_thumb(thumb)
-    except Exception as e:
-        return Response({'error': f'Upload failed: {str(e)}'}, status=500)
-    video = Video.objects.create(
-        user=request.user,
-        video_url=video_url,
-        thumbnail_url=thumbnail_url,
-        caption=request.data.get('caption', ''),
-        visibility=request.data.get('visibility', 'public'),
-    )
-    return Response(VideoSerializer(video, context={'request': request}).data, status=201)
